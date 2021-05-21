@@ -74,7 +74,7 @@ void cld_handler(int sig) {
 }
 
 ssize_t tftp_send_data(int s, uint16_t block_number, uint8_t *data,
-                       ssize_t dlen, struct sockaddr_in *sock, socklen_t slen)
+                       ssize_t dlen, struct sockaddr_in6 *sock, socklen_t slen)
 {
      tftp_message m;
      ssize_t c;
@@ -92,7 +92,7 @@ ssize_t tftp_send_data(int s, uint16_t block_number, uint8_t *data,
 }
 
 ssize_t tftp_send_ack(int s, uint16_t block_number,
-                      struct sockaddr_in *sock, socklen_t slen)
+                      struct sockaddr_in6 *sock, socklen_t slen)
 {
      tftp_message m;
      ssize_t c;
@@ -109,7 +109,7 @@ ssize_t tftp_send_ack(int s, uint16_t block_number,
 }
 
 ssize_t tftp_send_error(int s, int error_code, char *error_string,
-                        struct sockaddr_in *sock, socklen_t slen)
+                        struct sockaddr_in6 *sock, socklen_t slen)
 {
      tftp_message m;
      ssize_t c;
@@ -131,7 +131,7 @@ ssize_t tftp_send_error(int s, int error_code, char *error_string,
      return c;
 }
 
-ssize_t tftp_recv_message(int s, tftp_message *m, struct sockaddr_in *sock, socklen_t *slen)
+ssize_t tftp_recv_message(int s, tftp_message *m, struct sockaddr_in6 *sock, socklen_t *slen)
 {
      ssize_t c;
 
@@ -144,7 +144,7 @@ ssize_t tftp_recv_message(int s, tftp_message *m, struct sockaddr_in *sock, sock
 }
 
 void tftp_handle_request(tftp_message *m, ssize_t len,
-                         struct sockaddr_in *client_sock, socklen_t slen)
+                         struct sockaddr_in6 *client_sock, socklen_t slen)
 {
      int s;
      struct protoent *pp;
@@ -155,6 +155,8 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
      int mode;
      uint16_t opcode;
+	 static char buf[128];
+	 int client_port;
 
      /* open new socket, on new port, to handle client request */
 
@@ -163,7 +165,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
           exit(1);
      }
 
-     if ((s = socket(AF_INET, SOCK_DGRAM, pp->p_proto)) == -1) {
+     if ((s = socket(AF_INET6, SOCK_DGRAM, pp->p_proto)) == -1) {
           perror("server: socket()");
           exit(1);
      }
@@ -181,9 +183,12 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
      filename = m->request.filename_and_mode;
      end = &filename[len - 2 - 1];
 
+	 inet_ntop(AF_INET6, &client_sock->sin6_addr, buf, sizeof(buf));
+	 client_port = ntohs(client_sock->sin6_port);
+
      if (*end != '\0') {
           printf("%s.%u: invalid filename or mode\n",
-                 inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                 buf, ntohs(client_sock->sin6_port));
           tftp_send_error(s, 0, "invalid filename or mode", client_sock, slen);
           exit(1);
      }
@@ -192,7 +197,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
      if (mode_s > end) {
           printf("%s.%u: transfer mode not specified\n",
-                 inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                 buf, ntohs(client_sock->sin6_port));
           tftp_send_error(s, 0, "transfer mode not specified", client_sock, slen);
           exit(1);
      }
@@ -200,7 +205,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
      if(strncmp(filename, "../", 3) == 0 || strstr(filename, "/../") != NULL ||
         (filename[0] == '/' && strncmp(filename, base_directory, strlen(base_directory)) != 0)) {
           printf("%s.%u: filename outside base directory\n",
-                 inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                 buf, ntohs(client_sock->sin6_port));
           tftp_send_error(s, 0, "filename outside base directory", client_sock, slen);
           exit(1);
      }
@@ -220,13 +225,13 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
      if (mode == 0) {
           printf("%s.%u: invalid transfer mode\n",
-                 inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                 buf, ntohs(client_sock->sin6_port));
           tftp_send_error(s, 0, "invalid transfer mode", client_sock, slen);
           exit(1);
      }
 
      printf("%s.%u: request received: %s '%s' %s\n", 
-            inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port),
+            buf, ntohs(client_sock->sin6_port),
             ntohs(m->opcode) == RRQ ? "get" : "put", filename, mode_s);
 
      // TODO: add netascii handling
@@ -257,7 +262,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
                
                     if (c < 0) {
                          printf("%s.%u: transfer killed\n",
-                                inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                                buf, client_port);
                          exit(1);
                     }
 
@@ -265,7 +270,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
                     
                     if (c >= 0 && c < 4) {
                          printf("%s.%u: message with invalid size received\n",
-                                inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                                buf, client_port);
                          tftp_send_error(s, 0, "invalid request size", client_sock, slen);
                          exit(1);
                     }
@@ -276,7 +281,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
                     if (errno != EAGAIN) {
                          printf("%s.%u: transfer killed\n",
-                                inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                                buf, client_port);
                          exit(1);
                     }
 
@@ -284,27 +289,27 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
                if (!countdown) {
                     printf("%s.%u: transfer timed out\n",
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                           buf, client_port);
                     exit(1);
                }
 
                if (ntohs(m.opcode) == ERROR)  {
                     printf("%s.%u: error message received: %u %s\n",
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port),
+                           buf, client_port,
                            ntohs(m.error.error_code), m.error.error_string);
                     exit(1);
                }
 
                if (ntohs(m.opcode) != ACK)  {
                     printf("%s.%u: invalid message during transfer received\n",
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                           buf, client_port);
                     tftp_send_error(s, 0, "invalid message during transfer", client_sock, slen);
                     exit(1);
                }
               
                if (ntohs(m.ack.block_number) != block_number) { // the ack number is too high
                     printf("%s.%u: invalid ack number received\n", 
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                           buf, client_port);
                     tftp_send_error(s, 0, "invalid ack number", client_sock, slen);
                     exit(1);
                }
@@ -328,7 +333,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
           
           if (c < 0) {
                printf("%s.%u: transfer killed\n",
-                      inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                      buf, client_port);
                exit(1);
           }
 
@@ -340,7 +345,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
                     if (c >= 0 && c < 4) {
                          printf("%s.%u: message with invalid size received\n",
-                                inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                                buf, client_port);
                          tftp_send_error(s, 0, "invalid request size", client_sock, slen);
                          exit(1);
                     }
@@ -351,7 +356,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
                     if (errno != EAGAIN) {
                          printf("%s.%u: transfer killed\n",
-                                inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                                buf, client_port);
                          exit(1);
                     }
 
@@ -359,7 +364,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
               
                     if (c < 0) {
                          printf("%s.%u: transfer killed\n",
-                                inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                                buf, client_port);
                          exit(1);
                     }
 
@@ -367,7 +372,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
                if (!countdown) {
                     printf("%s.%u: transfer timed out\n",
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                           buf, client_port);
                     exit(1);
                }
 
@@ -379,21 +384,21 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
 
                if (ntohs(m.opcode) == ERROR)  {
                     printf("%s.%u: error message received: %u %s\n",
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port),
+                           buf, client_port,
                            ntohs(m.error.error_code), m.error.error_string);
                     exit(1);
                }
 
                if (ntohs(m.opcode) != DATA)  {
                     printf("%s.%u: invalid message during transfer received\n",
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                           buf, client_port);
                     tftp_send_error(s, 0, "invalid message during transfer", client_sock, slen);
                     exit(1);
                }
               
                if (ntohs(m.ack.block_number) != block_number) {
                     printf("%s.%u: invalid block number received\n", 
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                           buf, client_port);
                     tftp_send_error(s, 0, "invalid block number", client_sock, slen);
                     exit(1);
                }
@@ -409,7 +414,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
           
                if (c < 0) {
                     printf("%s.%u: transfer killed\n",
-                           inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+                           buf, client_port);
                     exit(1);
                }
 
@@ -418,7 +423,7 @@ void tftp_handle_request(tftp_message *m, ssize_t len,
      }
 
      printf("%s.%u: transfer completed\n",
-            inet_ntoa(client_sock->sin_addr), ntohs(client_sock->sin_port));
+            buf, client_port);
 
      fclose(fd);
      close(s);
@@ -432,7 +437,10 @@ int main(int argc, char *argv[])
      uint16_t port = 0;
      struct protoent *pp;
      struct servent *ss;
-     struct sockaddr_in server_sock;
+     struct sockaddr_in6 server_sock;
+	 int mode;
+	 static char buf[128];
+	 int client_port;
 
      if (argc < 2) {
           printf("usage:\n\t%s [base directory] [port]\n", argv[0]);
@@ -466,14 +474,14 @@ int main(int argc, char *argv[])
           exit(1);
      }
 
-     if ((s = socket(AF_INET, SOCK_DGRAM, pp->p_proto)) == -1) {
+     if ((s = socket(AF_INET6, SOCK_DGRAM, pp->p_proto)) == -1) {
           perror("server: socket() error");
           exit(1);
      }
 
-     server_sock.sin_family = AF_INET;
-     server_sock.sin_addr.s_addr = htonl(INADDR_ANY);
-     server_sock.sin_port = port ? port : ss->s_port;
+     server_sock.sin6_family = AF_INET6;
+     server_sock.sin6_addr = in6addr_any;
+     server_sock.sin6_port = port ? port : ss->s_port;
 
      if (bind(s, (struct sockaddr *) &server_sock, sizeof(server_sock)) == -1) {
           perror("server: bind()");
@@ -481,12 +489,15 @@ int main(int argc, char *argv[])
           exit(1);
      }
 
+	 mode = 0;
+	 setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&mode, sizeof(mode));
+
      signal(SIGCLD, (void *) cld_handler) ;
 
-     printf("tftp server: listening on %d\n", ntohs(server_sock.sin_port));
+     printf("tftp server: listening on %d\n", ntohs(server_sock.sin6_port));
 
      while (1) {
-          struct sockaddr_in client_sock;
+          struct sockaddr_in6 client_sock;
           socklen_t slen = sizeof(client_sock);
           ssize_t len;
 
@@ -496,10 +507,11 @@ int main(int argc, char *argv[])
           if ((len = tftp_recv_message(s, &message, &client_sock, &slen)) < 0) {
                continue;
           }
-
+		  client_port = ntohs(client_sock.sin6_port);
           if (len < 4) { 
+			   inet_ntop(AF_INET6, &client_sock.sin6_addr, buf, sizeof(buf));
                printf("%s.%u: request with invalid size received\n",
-                      inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
+                      buf, client_port);
                tftp_send_error(s, 0, "invalid request size", &client_sock, slen);
                continue;
           }
@@ -518,9 +530,9 @@ int main(int argc, char *argv[])
           }
 
           else {
-               printf("%s.%u: invalid request received: opcode \n", 
-                      inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port),
-                      opcode);
+			   inet_ntop(AF_INET6, &client_sock.sin6_addr, buf, sizeof(buf));
+               printf("%s.%u: invalid request received: opcode %d\n", 
+                      buf, client_port, opcode);
                tftp_send_error(s, 0, "invalid opcode", &client_sock, slen);
           }
 
